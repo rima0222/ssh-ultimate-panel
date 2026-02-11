@@ -1,33 +1,19 @@
 #!/bin/bash
-# بررسی دسترسی روت
+# SSH Ultimate Installer - Optimized for Ubuntu 24.04
 if [ "$EUID" -ne 0 ]; then 
-  echo "لطفا با sudo اجرا کنید"
+  echo "Error: Please run as root (sudo)."
   exit 1
 fi
 
-echo "--- در حال نصب پیش‌نیازهای سیستم ---"
+echo "--- Installing System Packages ---"
 apt update -y
 apt install -y python3 python3-pip vnstat sqlite3 psmisc bc curl
 
-# نصب کتابخانه‌های پایتون با متد دور زدن محدودیت اوبونتو جدید
-echo "--- نصب کتابخانه‌های پایتون ---"
+echo "--- Installing Python Libraries (PEP 668 Fix) ---"
 pip3 install fastapi uvicorn pydantic --break-system-packages
 
-# فعال‌سازی vnstat
+echo "--- Enabling Services ---"
 systemctl start vnstat
 systemctl enable vnstat
 
-echo "--- بررسی دیتابیس برای بازیابی کاربران ---"
-if [ -f "users.db" ]; then
-    sqlite3 users.db "SELECT username, password FROM users;" | while read -r line; do
-        user=$(echo "$line" | cut -d'|' -f1)
-        pass=$(echo "$line" | cut -d'|' -f2)
-        if ! id "$user" &>/dev/null; then
-            useradd -m -s /usr/sbin/nologin "$user"
-            echo "$user:$pass" | chpasswd
-            echo "کاربر $user بازیابی شد."
-        fi
-    done
-fi
-
-echo "--- نصب با موفقیت تمام شد ---"
+echo "--- Setup Complete ---"
