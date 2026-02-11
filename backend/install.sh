@@ -1,19 +1,20 @@
 #!/bin/bash
-# SSH Ultimate Installer - Optimized for Ubuntu 24.04
+# SSH Ultimate Installer - Fixed for Ubuntu 24.04
 if [ "$EUID" -ne 0 ]; then 
-  echo "Error: Please run as root (sudo)."
+  echo "لطفا با دسترسی روت (sudo) اجرا کنید."
   exit 1
 fi
 
-echo "--- Installing System Packages ---"
+echo "--- در حال نصب پکیج‌های سیستم ---"
 apt update -y
 apt install -y python3 python3-pip vnstat sqlite3 psmisc bc curl
 
-echo "--- Installing Python Libraries (PEP 668 Fix) ---"
-pip3 install fastapi uvicorn pydantic --break-system-packages
+echo "--- نصب کتابخانه‌های پایتون (رفع تداخل سیستمی) ---"
+# استفاده از --ignore-installed برای رد کردن خطای typing-extensions
+pip3 install fastapi uvicorn pydantic starlette anyio --break-system-packages --ignore-installed
 
-echo "--- Enabling Services ---"
+echo "--- تنظیمات vnstat ---"
 systemctl start vnstat
 systemctl enable vnstat
 
-echo "--- Setup Complete ---"
+echo "--- نصب با موفقیت انجام شد ---"
