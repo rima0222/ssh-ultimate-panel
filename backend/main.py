@@ -3,14 +3,14 @@ import sqlite3
 import subprocess
 import time
 import threading
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
 from pydantic import BaseModel
 from datetime import datetime
 
-app = FastAPI()
+app = FastAPI(title="SSH Ultimate Pro API")
 DB_PATH = "users.db"
 
-# --- مقداردهی اولیه دیتابیس ---
+# --- مرحله ۱: آماده‌سازی دیتابیس ---
 def init_db():
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
@@ -22,91 +22,97 @@ def init_db():
 
 init_db()
 
-# --- توابع مدیریت سیستم لینوکس ---
+# --- مرحله ۲: توابع مدیریت سیستم (Linux Interface) ---
 def manage_linux_user(username, password, action="add"):
     try:
         if action == "add":
-            subprocess.run(['useradd', '-m', '-s', '/usr/sbin/nologin', username], check=True)
-            subprocess.run(['sh', '-c', f'echo "{username}:{password}" | chpasswd'], check=True)
+            # ایجاد کاربر بدون شل با امنیت بالا
+            subprocess.run(['sudo', 'useradd', '-m', '-s', '/usr/sbin/nologin', username], check=True)
+            subprocess.run(['sh', '-c', f'echo "{username}:{password}" | sudo chpasswd'], check=True)
         elif action == "delete":
-            subprocess.run(['userdel', '-r', '-f', username], check=True)
+            subprocess.run(['sudo', 'userdel', '-r', '-f', username], check=True)
+        elif action == "kill":
+            subprocess.run(['sudo', 'pkill', '-u', username], check=True)
         return True
     except Exception as e:
-        print(f"Error managing user {username}: {e}")
+        print(f"Linux Task Error for {username}: {e}")
         return False
 
-def kill_user_sessions(username):
-    subprocess.run(['pkill', '-u', username])
-
-# --- واچ‌داگ (هر ۵ ثانیه چک می‌کند) ---
-def security_watchdog():
+# --- مرحله ۳: سیستم نظارت هوشمند (هر ۵ ثانیه) ---
+def security_watcher():
+    """
+    این تابع وظیفه دارد:
+    1. جلوی Multi-login را بگیرد (فقط یک نفر).
+    2. یوزرهای منقضی شده را دیسکانکت کند.
+    """
     while True:
         try:
             conn = sqlite3.connect(DB_PATH)
             c = conn.cursor()
-            
-            # ۱. چک کردن مولتی لاگین (فقط یک نفر مجاز است)
-            # خروجی دستور 'who' لیست افراد متصل را می‌دهد
-            who_output = subprocess.check_output(['who']).decode()
-            connected_users = [line.split()[0] for line in who_output.splitlines()]
-            
-            counts = {}
-            for u in connected_users:
-                counts[u] = counts.get(u, 0) + 1
-                if counts[u] > 1:
-                    print(f"Violation: {u} tried multi-login. Killing sessions...")
-                    kill_user_sessions(u)
 
-            # ۲. چک کردن تاریخ انقضا و حجم (ساده شده)
-            # در نسخه پیشرفته‌تر باید خروجی vnstat را برای هر یوزر پارس کنید
-            # فعلا یوزرهایی که انقضا یافته‌اند را غیرفعال می‌کنیم
+            # بررسی اتصال همزمان
+            who_proc = subprocess.Popen(['who'], stdout=subprocess.PIPE)
+            awk_proc = subprocess.Popen(['awk', '{print $1}'], stdin=who_proc.stdout, stdout=subprocess.PIPE)
+            who_proc.stdout.close()
+            connected_users = awk_proc.communicate()[0].decode().split()
+
+            user_counts = {}
+            for u in connected_users:
+                user_counts[u] = user_counts.get(u, 0) + 1
+                if user_counts[u] > 1:
+                    print(f"!!! Multi-login detected for {u}. Killing sessions...")
+                    manage_linux_user(u, None, "kill")
+
+            # بررسی انقضای تاریخ مصرف
             c.execute("SELECT username FROM users WHERE expiry_date < datetime('now') AND is_active = 1")
-            expired_users = c.fetchall()
-            for (u,) in expired_users:
-                print(f"User {u} expired. Disabling...")
-                kill_user_sessions(u)
+            expired_list = c.fetchall()
+            for (u,) in expired_list:
+                print(f"!!! User {u} expired. Disabling access...")
+                manage_linux_user(u, None, "kill")
                 c.execute("UPDATE users SET is_active = 0 WHERE username = ?", (u,))
-            
+
             conn.commit()
             conn.close()
         except Exception as e:
-            print(f"Watchdog error: {e}")
+            print(f"Watcher Error: {e}")
         
         time.sleep(5)
 
-# اجرای واچ‌داگ در ترد جداگانه
-threading.Thread(target=security_watchdog, daemon=True).start()
+# اجرای ناظر امنیت در پس‌زمینه
+threading.Thread(target=security_watcher, daemon=True).start()
 
-# --- مدل‌های داده برای API ---
-class UserCreate(BaseModel):
+# --- مرحله ۴: مدل‌های داده API ---
+class UserIn(BaseModel):
     username: str
     password: str
     traffic_gb: int
     days: int
 
-# --- API Endpoints ---
+# --- مرحله ۵: نقاط اتصال API (Endpoints) ---
 
-@app.post("/add_user")
-def add_user(user: UserCreate):
+@app.post("/api/add")
+def api_add_user(user: UserIn):
+    # ابتدا در لینوکس ساخته شود
     if manage_linux_user(user.username, user.password, "add"):
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
         try:
+            # ذخیره در دیتابیس با محاسبه تاریخ انقضا
             c.execute("INSERT INTO users VALUES (?, ?, datetime('now', '+{} days'), ?, 0, 1)".format(user.days), 
                       (user.username, user.password, user.traffic_gb))
             conn.commit()
-            return {"status": "success", "message": f"User {user.username} created"}
+            return {"status": "success", "user": user.username}
         except sqlite3.IntegrityError:
-            raise HTTPException(status_code=400, detail="User already exists")
+            raise HTTPException(status_code=400, detail="User already exists in Database")
         finally:
             conn.close()
-    return {"status": "error", "message": "Failed to create Linux user"}
+    raise HTTPException(status_code=500, detail="Failed to create system user")
 
-@app.get("/user_info/{username}")
-def get_user(username: str):
+@app.get("/api/info/{username}")
+def api_get_info(username: str):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    row = c.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
+    row = c.execute("SELECT * FROM users WHERE username=?", (username,)).fetchone()
     conn.close()
     
     if row:
@@ -115,18 +121,15 @@ def get_user(username: str):
             "expiry": row[2],
             "limit_gb": row[3],
             "used_mb": row[4],
-            "status": "Active" if row[5] == 1 else "Expired/Disabled"
+            "is_active": bool(row[5])
         }
     raise HTTPException(status_code=404, detail="User not found")
 
-@app.get("/admin/backup")
-def download_db():
-    # در فلاتر می‌توانید این فایل را مستقیما دانلود کنید
-    if os.path.exists(DB_PATH):
-        return {"db_url": f"http://YOUR_SERVER_IP:5000/static/{DB_PATH}"} # نیاز به StaticFiles دارد
-    return {"error": "File not found"}
+@app.get("/api/status")
+def server_status():
+    return {"status": "online", "server_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
 
 if __name__ == "__main__":
     import uvicorn
-    # اجرا روی پورت ۵۰۰۰
+    # اجرا روی پورت ۵۰۰۰ برای پنل و اپلیکیشن
     uvicorn.run(app, host="0.0.0.0", port=5000)
