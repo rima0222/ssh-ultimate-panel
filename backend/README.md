@@ -9,15 +9,17 @@
 کافیست دستورات زیر را به ترتیب در ترمینال سرور خود کپی و پیست کنید:
 
 ### ۱. دریافت پروژه از گیت‌هاب
+ابتدا مخزن را کلون کرده و وارد پوشه بک‌اِند شوید:
+
 ```bash
 git clone [https://github.com/rima0222/ssh-ultimate-panel.git](https://github.com/rima0222/ssh-ultimate-panel.git) && cd ssh-ultimate-panel/backend
+۲. نصب خودکار پیش‌نیازها
+این دستور تمام پکیج‌های مورد نیاز (Python, Vnstat, SQLite) را نصب و تنظیم می‌کند:
 
-
-
-
+Bash
 chmod +x install.sh && sudo ./install.sh
+۳. اجرای سرور (پورت ۵۰۰۰)
+برای فعال‌سازی API و سیستم مانیتورینگ کاربران، این دستور را بزنید:
 
-
-
-
+Bash
 python3 main.py
