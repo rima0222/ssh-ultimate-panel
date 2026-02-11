@@ -1,40 +1,33 @@
 #!/bin/bash
-
 # بررسی دسترسی روت
 if [ "$EUID" -ne 0 ]; then 
-  echo "لطفا اسکریپت را با دسترسی root اجرا کنید (sudo)."
-  exit
+  echo "لطفا با sudo اجرا کنید"
+  exit 1
 fi
 
-echo "--- شروع نصب پکیج‌های مورد نیاز ---"
-apt update
-apt install -y python3 python3-pip vnstat sqlite3 psmisc bc
+echo "--- در حال نصب پیش‌نیازهای سیستم ---"
+apt update -y
+apt install -y python3 python3-pip vnstat sqlite3 psmisc bc curl
 
-# نصب کتابخانه‌های پایتون
-pip3 install fastapi uvicorn
+# نصب کتابخانه‌های پایتون با متد دور زدن محدودیت اوبونتو جدید
+echo "--- نصب کتابخانه‌های پایتون ---"
+pip3 install fastapi uvicorn pydantic --break-system-packages
 
-# راه‌اندازی vnstat برای مانیتورینگ کارت شبکه
+# فعال‌سازی vnstat
 systemctl start vnstat
 systemctl enable vnstat
 
-echo "--- بررسی و بازیابی بک‌آپ ---"
+echo "--- بررسی دیتابیس برای بازیابی کاربران ---"
 if [ -f "users.db" ]; then
-    echo "فایل دیتابیس پیدا شد. در حال بازسازی یوزرهای سیستم..."
-    # استخراج یوزر و پسورد از دیتابیس و ساخت مجدد در لینوکس
-    users=$(sqlite3 users.db "SELECT username, password FROM users;")
-    for row in $users; do
-        user=$(echo $row | cut -d'|' -f1)
-        pass=$(echo $row | cut -d'|' -f2)
+    sqlite3 users.db "SELECT username, password FROM users;" | while read -r line; do
+        user=$(echo "$line" | cut -d'|' -f1)
+        pass=$(echo "$line" | cut -d'|' -f2)
         if ! id "$user" &>/dev/null; then
             useradd -m -s /usr/sbin/nologin "$user"
             echo "$user:$pass" | chpasswd
-            echo "یوزر $user با موفقیت بازیابی شد."
+            echo "کاربر $user بازیابی شد."
         fi
     done
-else
-    echo "دیتابیس قبلی یافت نشد. یک دیتابیس جدید ساخته خواهد شد."
 fi
 
-echo "--- نصب به پایان رسید ---"
-echo "حالا می‌توانید با دستور زیر سرور را اجرا کنید:"
-echo "python3 main.py"
+echo "--- نصب با موفقیت تمام شد ---"
